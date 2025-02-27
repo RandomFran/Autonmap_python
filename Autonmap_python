@@ -5,19 +5,27 @@ import sys
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime
+from tqdm import tqdm
+import time
+import threading
+import shutil
+
+# Función para mostrar el uso del script
+def mostrar_uso():
+    print("Uso: {} <IP>".format(sys.argv[0]))
+    sys.exit(1)
+
+# Verificar si se proporcionó una IP como argumento
+if len(sys.argv) < 2:
+    mostrar_uso()
+
+# Asignar la IP proporcionada a una variable
+ip = sys.argv[1]
 
 # Función para verificar si una IP es válida
 def validar_ip(ip):
     patron_ip = re.compile(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')
     return bool(patron_ip.match(ip))
-
-# Verificar si se proporcionó una IP como argumento
-if len(sys.argv) != 2:
-    print("Uso: {} <IP>".format(sys.argv[0]))
-    sys.exit(1)
-
-# Asignar la IP proporcionada a una variable
-ip = sys.argv[1]
 
 # Verificar si la IP es válida
 if not validar_ip(ip):
@@ -41,26 +49,43 @@ except subprocess.CalledProcessError:
 # Crear un nombre base para los archivos de salida
 output_base = f"escaneo_{ip}"
 
-# Ejecutar nmap con las opciones -sC, -sV, -p-, sin mostrar la salida en la terminal
-print(f"Escaneando la IP {ip} con nmap...")
-try:
-    with open(f"{output_base}.nmap", "w") as f:
-        subprocess.run(
-            ["nmap", "-sC", "-sV", "-p-", "-oA", output_base, ip],
-            stdout=f,  # Redirigir la salida estándar al archivo .nmap
-            stderr=subprocess.DEVNULL,  # Redirigir la salida de error a /dev/null
-            check=True
-        )
-    print("Escaneo completado. Resultados guardados en:")
-    print(f"- {output_base}.nmap (formato de texto)")
-    print(f"- {output_base}.xml (formato XML)")
-    print(f"- {output_base}.gnmap (formato grepable)")
-except subprocess.CalledProcessError:
+# Función para mostrar una barra de progreso
+def mostrar_progreso():
+    # Obtener el ancho de la terminal y reducirlo a un cuarto
+    ancho_terminal = shutil.get_terminal_size().columns
+    ancho_barra = max(20, ancho_terminal // 4)  # Mínimo 20 caracteres
+
+    with tqdm(total=100, desc="Escaneando", unit="%", ncols=ancho_barra) as pbar:
+        while proceso_nmap.is_alive():
+            pbar.update(1)
+            time.sleep(1)
+        # Completar la barra al 100%
+        pbar.n = 100
+        pbar.refresh()
+
+# Ejecutar nmap en segundo plano
+print(f"Iniciando escaneo de la IP {ip} con nmap...")
+proceso_nmap = threading.Thread(
+    target=subprocess.run,
+    args=(["nmap", "-sC", "-sV", "-p-", "-oA", output_base, ip],),
+    kwargs={"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+)
+proceso_nmap.start()
+
+# Mostrar la barra de progreso
+mostrar_progreso()
+
+# Esperar a que nmap termine
+proceso_nmap.join()
+
+if proceso_nmap.is_alive():
     print("Error: El escaneo de nmap falló.")
     sys.exit(1)
-except Exception as e:
-    print(f"Error inesperado: {e}")
-    sys.exit(1)
+
+print("Escaneo completado. Resultados guardados en:")
+print(f"- {output_base}.nmap (formato de texto)")
+print(f"- {output_base}.xml (formato XML)")
+print(f"- {output_base}.gnmap (formato grepable)")
 
 # Función para generar un informe resumido
 def generar_informe(output_base):
